@@ -15,6 +15,7 @@ CACHE_SIZE="${CACHE_SIZE:-10000}"
 LOG_QUERIES="${LOG_QUERIES:-0}"
 ADMIN_BIND="${ADMIN_BIND:-127.0.0.1}"
 ADMIN_PORT="${ADMIN_PORT:-8080}"
+CLIENT_ALLOWLIST="${CLIENT_ALLOWLIST:-}"
 RAW_BASE="${RAW_BASE:-}"
 
 info() {
@@ -111,15 +112,41 @@ write_dns_service_files() {
 
 open_firewall_if_available() {
   if command -v ufw >/dev/null 2>&1 && ufw status | grep -qi "Status: active"; then
-    info "开放 ufw DNS 端口 $DNS_PORT/udp 与 $DNS_PORT/tcp..."
-    ufw allow "$DNS_PORT/udp" || true
-    ufw allow "$DNS_PORT/tcp" || true
+    if [ -n "$CLIENT_ALLOWLIST" ]; then
+      info "按客户端白名单开放 ufw DNS 端口..."
+      IFS=',' read -r -a clients <<<"$CLIENT_ALLOWLIST"
+      for client in "${clients[@]}"; do
+        client="${client//[[:space:]]/}"
+        [ -z "$client" ] && continue
+        ufw allow from "$client" to any port "$DNS_PORT" proto udp || true
+        ufw allow from "$client" to any port "$DNS_PORT" proto tcp || true
+      done
+    else
+      info "开放 ufw DNS 端口 $DNS_PORT/udp 与 $DNS_PORT/tcp..."
+      ufw allow "$DNS_PORT/udp" || true
+      ufw allow "$DNS_PORT/tcp" || true
+    fi
   fi
 
   if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
-    info "开放 firewalld DNS 服务..."
-    firewall-cmd --permanent --add-service=dns || true
+    if [ -n "$CLIENT_ALLOWLIST" ]; then
+      info "按客户端白名单开放 firewalld DNS 端口..."
+      IFS=',' read -r -a clients <<<"$CLIENT_ALLOWLIST"
+      for client in "${clients[@]}"; do
+        client="${client//[[:space:]]/}"
+        [ -z "$client" ] && continue
+        firewall-cmd --permanent --add-rich-rule="rule family=\"ipv4\" source address=\"$client\" port protocol=\"udp\" port=\"$DNS_PORT\" accept" || true
+        firewall-cmd --permanent --add-rich-rule="rule family=\"ipv4\" source address=\"$client\" port protocol=\"tcp\" port=\"$DNS_PORT\" accept" || true
+      done
+    else
+      info "开放 firewalld DNS 服务..."
+      firewall-cmd --permanent --add-service=dns || true
+    fi
     firewall-cmd --reload || true
+  fi
+
+  if [ -n "$CLIENT_ALLOWLIST" ] && ! command -v ufw >/dev/null 2>&1 && ! command -v firewall-cmd >/dev/null 2>&1; then
+    warn "已设置 CLIENT_ALLOWLIST，但未检测到 ufw 或 firewalld。请在云防火墙/系统防火墙中只允许这些客户端访问 $DNS_PORT 端口：$CLIENT_ALLOWLIST"
   fi
 }
 
@@ -195,6 +222,7 @@ print_summary() {
 监听地址: $LISTEN_ADDR
 监听端口: $DNS_PORT
 上游 DNS: $UPSTREAM_DNS
+客户端白名单: ${CLIENT_ALLOWLIST:-未设置}
 主配置:   $DNSMASQ_CONFIG
 自定义 hosts: $CONFIG_DIR/hosts
 Web 面板: http://$ADMIN_BIND:$ADMIN_PORT

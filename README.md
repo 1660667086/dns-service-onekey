@@ -36,6 +36,12 @@ curl -fsSL https://raw.githubusercontent.com/你的用户名/dns-service-onekey/
 curl -fsSL https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main/bootstrap.sh | sudo env GITHUB_REPO=你的用户名/dns-service-onekey LISTEN_ADDR=0.0.0.0 bash
 ```
 
+如果这台服务器要作为 DNS 给其他服务器使用，推荐同时设置客户端白名单。把 `1.2.3.4,5.6.7.8` 换成允许使用 DNS 的服务器公网 IP：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main/bootstrap.sh | sudo env GITHUB_REPO=你的用户名/dns-service-onekey LISTEN_ADDR=0.0.0.0 CLIENT_ALLOWLIST=1.2.3.4,5.6.7.8 bash
+```
+
 安装完成后会同时启动 Web 管理面板，默认只监听本机：
 
 ```text
@@ -75,6 +81,7 @@ sudo LISTEN_ADDR=0.0.0.0 \
 | `LOG_QUERIES` | `0` | 设为 `1` 后记录查询日志 |
 | `ADMIN_BIND` | `127.0.0.1` | Web 管理面板监听地址 |
 | `ADMIN_PORT` | `8080` | Web 管理面板端口 |
+| `CLIENT_ALLOWLIST` | 空 | 允许访问 DNS 的客户端 IP，多个用英文逗号分隔 |
 | `GITHUB_REPO` | 空 | GitHub 仓库，例如 `你的用户名/dns-service-onekey` |
 | `REPO_URL` | 空 | 完整 Git 仓库地址 |
 | `BRANCH` | `main` | 要安装的分支 |
@@ -128,6 +135,36 @@ router.lan -> 192.168.1.1
 ```
 
 每次保存后，面板会自动重写 `/etc/dns-service/hosts` 并重启 `dnsmasq`。
+
+## 给其他服务器当 DNS
+
+在 DNS 服务器上安装，假设 DNS 服务器公网 IP 是 `8.8.8.8`，允许使用它的客户端服务器公网 IP 是 `1.2.3.4` 和 `5.6.7.8`：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/1660667086/dns-service-onekey/main/bootstrap.sh | sudo env GITHUB_REPO=1660667086/dns-service-onekey LISTEN_ADDR=0.0.0.0 CLIENT_ALLOWLIST=1.2.3.4,5.6.7.8 bash
+```
+
+然后在客户端服务器上临时测试：
+
+```bash
+dig @8.8.8.8 example.com
+```
+
+如果要让客户端服务器长期使用这台 DNS，可以编辑客户端服务器的 DNS 配置。Ubuntu/Debian 常见方式：
+
+```bash
+sudo resolvectl dns eth0 8.8.8.8
+sudo resolvectl domain eth0 '~.'
+resolvectl status
+```
+
+如果系统直接使用 `/etc/resolv.conf`：
+
+```bash
+printf 'nameserver 8.8.8.8\n' | sudo tee /etc/resolv.conf
+```
+
+云服务器还需要在云厂商安全组里放行 DNS 服务器的 `53/udp` 和 `53/tcp`，来源只填你的客户端服务器 IP，不要开放给全网。
 
 ## 添加自定义解析
 
@@ -189,4 +226,4 @@ sudo REMOVE_DATA=1 bash uninstall.sh
 
 - 只监听 `127.0.0.1` 给本机用
 - 只监听内网 IP 给局域网用
-- 如果必须公网开放，请在防火墙里限制允许访问的客户端 IP
+- 如果必须公网开放，请设置 `CLIENT_ALLOWLIST`，并在云防火墙里限制允许访问的客户端 IP
