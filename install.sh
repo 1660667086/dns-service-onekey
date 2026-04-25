@@ -8,6 +8,7 @@ DNSMASQ_CONFIG="/etc/dnsmasq.d/github-dns-service.conf"
 ADMIN_APP_DIR="/opt/dns-service-onekey"
 ADMIN_SERVICE_FILE="/etc/systemd/system/${ADMIN_SERVICE_NAME}.service"
 CLIENTS_FILE="$CONFIG_DIR/clients.allow"
+RECORDS_FILE="$CONFIG_DIR/conf.d/records.conf"
 FIREWALL_SYNC_SCRIPT="$ADMIN_APP_DIR/scripts/sync-firewall.sh"
 
 LISTEN_ADDR="${LISTEN_ADDR:-127.0.0.1}"
@@ -87,8 +88,10 @@ write_dns_service_files() {
   install -d -m 0755 /etc/dnsmasq.d
   install -d -m 0755 "$CONFIG_DIR/conf.d"
   touch "$CONFIG_DIR/hosts"
+  touch "$RECORDS_FILE"
   touch "$CLIENTS_FILE"
   chmod 0644 "$CONFIG_DIR/hosts"
+  chmod 0644 "$RECORDS_FILE"
   chmod 0644 "$CLIENTS_FILE"
 
   if [ -n "$CLIENT_ALLOWLIST" ]; then
@@ -109,7 +112,6 @@ write_dns_service_files() {
     echo "domain-needed"
     echo "bogus-priv"
     echo "cache-size=$CACHE_SIZE"
-    echo "addn-hosts=$CONFIG_DIR/hosts"
     echo "conf-dir=$CONFIG_DIR/conf.d,*.conf"
     IFS=',' read -r -a upstreams <<<"$UPSTREAM_DNS"
     for dns in "${upstreams[@]}"; do
@@ -221,6 +223,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 Environment=DNS_HOSTS_FILE=$CONFIG_DIR/hosts
+Environment=DNS_RECORDS_FILE=$RECORDS_FILE
 Environment=DNS_ADMIN_TOKEN_FILE=$CONFIG_DIR/admin.token
 Environment=DNS_ADMIN_BIND=$ADMIN_BIND
 Environment=DNS_ADMIN_PORT=$ADMIN_PORT
@@ -250,7 +253,8 @@ print_summary() {
 上游 DNS: $UPSTREAM_DNS
 客户端白名单: ${CLIENT_ALLOWLIST:-未设置}
 主配置:   $DNSMASQ_CONFIG
-自定义 hosts: $CONFIG_DIR/hosts
+解析记录: $RECORDS_FILE
+兼容 hosts: $CONFIG_DIR/hosts
 客户端白名单文件: $CLIENTS_FILE
 Web 面板: http://$ADMIN_BIND:$ADMIN_PORT
 管理 Token: $CONFIG_DIR/admin.token
@@ -263,7 +267,7 @@ Web 面板: http://$ADMIN_BIND:$ADMIN_PORT
   dig @$LISTEN_ADDR example.com -p $DNS_PORT
 
 添加自定义解析:
-  echo "1.2.3.4 example.test" >> $CONFIG_DIR/hosts
+  echo "address=/example.test/1.2.3.4" >> $RECORDS_FILE
   systemctl restart dnsmasq
 
 EOF

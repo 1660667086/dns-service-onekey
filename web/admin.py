@@ -13,7 +13,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-HOSTS_FILE = Path(os.environ.get("DNS_HOSTS_FILE", "/etc/dns-service/hosts"))
+RECORDS_FILE = Path(os.environ.get("DNS_RECORDS_FILE", "/etc/dns-service/conf.d/records.conf"))
+LEGACY_HOSTS_FILE = Path(os.environ.get("DNS_HOSTS_FILE", "/etc/dns-service/hosts"))
 CLIENTS_FILE = Path(os.environ.get("DNS_CLIENTS_FILE", "/etc/dns-service/clients.allow"))
 TOKEN_FILE = Path(os.environ.get("DNS_ADMIN_TOKEN_FILE", "/etc/dns-service/admin.token"))
 BIND = os.environ.get("DNS_ADMIN_BIND", "127.0.0.1")
@@ -302,7 +303,7 @@ INDEX_HTML = r"""<!doctype html>
     }
     async function loadRecords() {
       const data = await api("/api/records");
-      $("statusText").innerHTML = `<strong>${data.count}</strong> 条解析记录，保存后自动重启 dnsmasq`;
+      $("statusText").innerHTML = `<strong>${data.count}</strong> 条解析记录，保存为 dnsmasq address 规则`;
       render(data.records);
     }
     async function loadClients() {
@@ -451,34 +452,49 @@ def ensure_token():
     return TOKEN_FILE.read_text(encoding="utf-8").strip()
 
 
-def parse_hosts():
-    HOSTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    HOSTS_FILE.touch(exist_ok=True)
+def parse_records():
+    RECORDS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    RECORDS_FILE.touch(exist_ok=True)
     records = []
-    for line in HOSTS_FILE.read_text(encoding="utf-8").splitlines():
+    for line in RECORDS_FILE.read_text(encoding="utf-8").splitlines():
         raw = line.strip()
         if not raw or raw.startswith("#"):
             continue
         left, _, comment = raw.partition("#")
-        parts = left.split()
-        if len(parts) < 2:
+        left = left.strip()
+        if not left.startswith("address=/"):
             continue
-        ip = parts[0]
-        for host in parts[1:]:
-            records.append({"ip": ip, "host": host, "comment": comment.strip()})
+        parts = left.split("=", 1)[1].strip().split("/")
+        if len(parts) != 3 or parts[0] != "":
+            continue
+        host, ip = parts[1], parts[2]
+        records.append({"ip": ip, "host": host, "comment": comment.strip()})
+
+    if not records and LEGACY_HOSTS_FILE.exists():
+        for line in LEGACY_HOSTS_FILE.read_text(encoding="utf-8").splitlines():
+            raw = line.strip()
+            if not raw or raw.startswith("#"):
+                continue
+            left, _, comment = raw.partition("#")
+            parts = left.split()
+            if len(parts) < 2:
+                continue
+            ip = parts[0]
+            for host in parts[1:]:
+                records.append({"ip": ip, "host": host, "comment": comment.strip()})
     return sorted(records, key=lambda item: item["host"])
 
 
-def write_hosts(records):
-    lines = ["# Managed by DNS Web Admin"]
+def write_records(records):
+    lines = ["# Managed by DNS Web Admin", "# Format: address=/domain/ip"]
     for record in sorted(records, key=lambda item: item["host"]):
         comment = f" # {record['comment']}" if record.get("comment") else ""
-        lines.append(f"{record['ip']} {record['host']}{comment}")
+        lines.append(f"address=/{record['host']}/{record['ip']}{comment}")
 
-    fd, tmp_name = tempfile.mkstemp(prefix=".hosts.", dir=str(HOSTS_FILE.parent), text=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=".records.", dir=str(RECORDS_FILE.parent), text=True)
     with os.fdopen(fd, "w", encoding="utf-8") as tmp:
         tmp.write("\n".join(lines) + "\n")
-    os.replace(tmp_name, HOSTS_FILE)
+    os.replace(tmp_name, RECORDS_FILE)
 
 
 def parse_clients():
@@ -563,7 +579,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "未授权"}, HTTPStatus.UNAUTHORIZED)
                 return
             with LOCK:
-                records = parse_hosts()
+                records = parse_records()
             self.send_json({"records": records, "count": len(records)})
             return
         if path == "/api/clients":
@@ -605,11 +621,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             record = validate_record(self.read_json())
             with LOCK:
-                records = parse_hosts()
+                records = parse_records()
                 if any(item["host"] == record["host"] for item in records):
                     raise ValueError("域名已存在")
                 records.append(record)
-                write_hosts(records)
+                write_records(records)
                 restart_dnsmasq()
             self.send_json({"ok": True})
         except (ValueError, subprocess.CalledProcessError) as exc:
@@ -645,11 +661,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             record = validate_record(self.read_json())
             with LOCK:
-                records = [item for item in parse_hosts() if item["host"] != host]
+                records = [item for item in parse_records() if item["host"] != host]
                 if record["host"] != host and any(item["host"] == record["host"] for item in records):
                     raise ValueError("域名已存在")
                 records.append(record)
-                write_hosts(records)
+                write_records(records)
                 restart_dnsmasq()
             self.send_json({"ok": True})
         except (ValueError, subprocess.CalledProcessError) as exc:
@@ -680,8 +696,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             with LOCK:
-                records = [item for item in parse_hosts() if item["host"] != host]
-                write_hosts(records)
+                records = [item for item in parse_records() if item["host"] != host]
+                write_records(records)
                 restart_dnsmasq()
             self.send_json({"ok": True})
         except subprocess.CalledProcessError as exc:

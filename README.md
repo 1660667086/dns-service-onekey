@@ -141,7 +141,7 @@ nas.lan -> 10.0.0.10
 router.lan -> 192.168.1.1
 ```
 
-每次保存后，面板会自动重写 `/etc/dns-service/hosts` 并重启 `dnsmasq`。
+每次保存后，面板会自动重写 `/etc/dns-service/conf.d/records.conf` 并重启 `dnsmasq`。记录会使用 `address=/域名/IP` 格式，效果接近你那台可用服务器的 `custom_netflix.conf`。
 
 允许 IP 示例：
 
@@ -198,14 +198,14 @@ curl -fsSL https://raw.githubusercontent.com/1660667086/dns-service-onekey/main/
 安装后编辑：
 
 ```bash
-sudo nano /etc/dns-service/hosts
+sudo nano /etc/dns-service/conf.d/records.conf
 ```
 
 示例：
 
 ```text
-1.2.3.4 example.test
-10.0.0.10 nas.lan
+address=/example.test/1.2.3.4
+address=/nas.lan/10.0.0.10
 ```
 
 重启服务：
