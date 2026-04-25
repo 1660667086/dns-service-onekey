@@ -1,6 +1,6 @@
 # DNS Service Onekey
 
-一个可以放到 GitHub 上，让 Linux 服务器直接拉取安装的 DNS 解锁服务。它基于 `dnsmasq` 做域名解析，用内置 SNI/HTTP 转发服务接住 80/443 流量，并提供 Web 面板管理允许使用的客户端 IP。
+一个可以放到 GitHub 上，让 Linux 服务器直接拉取安装的 DNS 解锁服务。它按教程方式使用 `dnsmasq + sniproxy`：`dnsmasq` 做域名解析，`sniproxy` 接住 80/443 流量，并提供 Web 面板管理允许使用的客户端 IP。
 
 ## 支持系统
 
@@ -21,7 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/1660667086/dns-service-onekey/main/
 默认会自动完成：
 
 - DNS 监听 `0.0.0.0:53`
-- 解锁转发服务监听 `0.0.0.0:80` 和 `0.0.0.0:443`
+- `sniproxy` 监听 `0.0.0.0:80` 和 `0.0.0.0:443`
 - Web 面板监听 `0.0.0.0:8080`
 - 自动检测本机公网 IP 作为 `UNLOCK_TARGET_IP`
 - 自动生成 `address=/域名/本机公网IP` 解锁规则
@@ -105,7 +105,7 @@ http://服务器IP:8080
 
 域名解锁规则不在面板里改。安装时会自动检测本机公网 IP，并把 `config/unlock-domains.txt` 里的域名写入 `/etc/dns-service/conf.d/records.conf`，格式是 `address=/域名/IP`，效果接近你那台可用服务器的 `custom_netflix.conf`。
 
-这些域名会解析到新服务器自己，然后由 `dns-unlock-proxy` 服务在 80/443 端口按 HTTP Host 或 TLS SNI 转发到真实目标站点。整个项目不读取、不复制、不修改 `154.64.225.137` 那台服务器的任何文件。
+这些域名会解析到新服务器自己，然后由 `sniproxy` 在 80/443 端口按 HTTP Host 或 TLS SNI 转发到真实目标站点。整个项目不读取、不复制、不修改 `154.64.225.137` 那台服务器的任何文件。
 
 允许 IP 示例：
 
@@ -173,10 +173,10 @@ dig @服务器IP example.com
 ```bash
 systemctl status dnsmasq
 systemctl status dns-service-admin
-systemctl status dns-unlock-proxy
+systemctl status sniproxy
 journalctl -u dnsmasq -f
 journalctl -u dns-service-admin -f
-journalctl -u dns-unlock-proxy -f
+journalctl -u sniproxy -f
 ```
 
 ## 卸载
