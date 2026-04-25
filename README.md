@@ -13,7 +13,7 @@
 把仓库推到 GitHub 后，将下面的地址替换成你的 GitHub 用户名和仓库名：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main/install.sh | sudo env RAW_BASE=https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main bash
 ```
 
 默认只监听本机：
@@ -25,7 +25,25 @@ curl -fsSL https://raw.githubusercontent.com/你的用户名/dns-service-onekey/
 如果要让局域网或公网访问，请明确指定监听地址：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main/install.sh | sudo env LISTEN_ADDR=0.0.0.0 bash
+curl -fsSL https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main/install.sh | sudo env RAW_BASE=https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main LISTEN_ADDR=0.0.0.0 bash
+```
+
+安装完成后会同时启动 Web 管理面板，默认只监听本机：
+
+```text
+http://127.0.0.1:8080
+```
+
+登录 Token 在服务器上查看：
+
+```bash
+sudo cat /etc/dns-service/admin.token
+```
+
+如果要让局域网访问 Web 面板：
+
+```bash
+sudo ADMIN_BIND=0.0.0.0 ADMIN_PORT=8080 bash install.sh
 ```
 
 ## 自定义安装参数
@@ -47,6 +65,9 @@ sudo LISTEN_ADDR=0.0.0.0 \
 | `UPSTREAM_DNS` | `1.1.1.1,8.8.8.8` | 上游 DNS，多个用英文逗号分隔 |
 | `CACHE_SIZE` | `10000` | DNS 缓存条数 |
 | `LOG_QUERIES` | `0` | 设为 `1` 后记录查询日志 |
+| `ADMIN_BIND` | `127.0.0.1` | Web 管理面板监听地址 |
+| `ADMIN_PORT` | `8080` | Web 管理面板端口 |
+| `RAW_BASE` | 空 | 使用 `curl | bash` 安装时，用来下载 Web 面板文件 |
 
 ## Git clone 安装
 
@@ -55,6 +76,37 @@ git clone https://github.com/你的用户名/dns-service-onekey.git
 cd dns-service-onekey
 sudo bash install.sh
 ```
+
+Git clone 安装时不需要设置 `RAW_BASE`，脚本会直接复制仓库里的 Web 面板文件。
+
+## Web 可视化管理
+
+打开：
+
+```text
+http://服务器IP:8080
+```
+
+如果默认安装，面板只监听 `127.0.0.1`。可以通过 SSH 隧道访问：
+
+```bash
+ssh -L 8080:127.0.0.1:8080 root@服务器IP
+```
+
+然后在本地浏览器打开：
+
+```text
+http://127.0.0.1:8080
+```
+
+登录后可以在页面上添加、编辑、删除解析记录，例如：
+
+```text
+nas.lan -> 10.0.0.10
+router.lan -> 192.168.1.1
+```
+
+每次保存后，面板会自动重写 `/etc/dns-service/hosts` 并重启 `dnsmasq`。
 
 ## 添加自定义解析
 
@@ -93,7 +145,9 @@ dig @服务器IP example.com
 
 ```bash
 systemctl status dnsmasq
+systemctl status dns-service-admin
 journalctl -u dnsmasq -f
+journalctl -u dns-service-admin -f
 ```
 
 ## 卸载
