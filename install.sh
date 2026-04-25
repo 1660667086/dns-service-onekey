@@ -19,6 +19,7 @@ LOG_QUERIES="${LOG_QUERIES:-0}"
 ADMIN_BIND="${ADMIN_BIND:-127.0.0.1}"
 ADMIN_PORT="${ADMIN_PORT:-8080}"
 CLIENT_ALLOWLIST="${CLIENT_ALLOWLIST:-}"
+UNLOCK_TARGET_IP="${UNLOCK_TARGET_IP:-}"
 RAW_BASE="${RAW_BASE:-}"
 
 info() {
@@ -103,6 +104,10 @@ write_dns_service_files() {
     done
   fi
 
+  if [ -n "$UNLOCK_TARGET_IP" ]; then
+    write_preset_unlock_records "$UNLOCK_TARGET_IP"
+  fi
+
   {
     echo "# Managed by dns-service-onekey"
     echo "port=$DNS_PORT"
@@ -123,6 +128,42 @@ write_dns_service_files() {
       echo "log-facility=/var/log/dnsmasq.log"
     fi
   } >"$DNSMASQ_CONFIG"
+}
+
+write_preset_unlock_records() {
+  local target_ip="$1"
+  local domains_file=""
+  local script_dir=""
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+
+  if [ -n "$script_dir" ] && [ -f "$script_dir/config/unlock-domains.txt" ]; then
+    domains_file="$script_dir/config/unlock-domains.txt"
+  elif [ -n "$RAW_BASE" ]; then
+    domains_file="$(mktemp)"
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL "$RAW_BASE/config/unlock-domains.txt" -o "$domains_file"
+    elif command -v wget >/dev/null 2>&1; then
+      wget -qO "$domains_file" "$RAW_BASE/config/unlock-domains.txt"
+    else
+      warn "未找到 curl 或 wget，无法下载预置域名列表。"
+      return
+    fi
+  else
+    warn "未找到 config/unlock-domains.txt，跳过预置解锁域名。"
+    return
+  fi
+
+  info "写入预置解锁域名到 $RECORDS_FILE..."
+  {
+    echo "# Managed by dns-service-onekey"
+    echo "# Generated from config/unlock-domains.txt"
+    while IFS= read -r domain; do
+      domain="${domain%%#*}"
+      domain="${domain//[[:space:]]/}"
+      [ -z "$domain" ] && continue
+      echo "address=/$domain/$target_ip"
+    done <"$domains_file"
+  } >"$RECORDS_FILE"
 }
 
 open_firewall_if_available() {
@@ -187,13 +228,19 @@ install_admin_panel() {
   if [ -n "$script_dir" ] && [ -f "$script_dir/web/admin.py" ]; then
     install -m 0755 "$script_dir/web/admin.py" "$ADMIN_APP_DIR/web/admin.py"
     install -m 0755 "$script_dir/scripts/sync-firewall.sh" "$FIREWALL_SYNC_SCRIPT"
+    install -d -m 0755 "$ADMIN_APP_DIR/config"
+    install -m 0644 "$script_dir/config/unlock-domains.txt" "$ADMIN_APP_DIR/config/unlock-domains.txt"
   elif [ -n "$RAW_BASE" ]; then
     if command -v curl >/dev/null 2>&1; then
       curl -fsSL "$RAW_BASE/web/admin.py" -o "$ADMIN_APP_DIR/web/admin.py"
       curl -fsSL "$RAW_BASE/scripts/sync-firewall.sh" -o "$FIREWALL_SYNC_SCRIPT"
+      install -d -m 0755 "$ADMIN_APP_DIR/config"
+      curl -fsSL "$RAW_BASE/config/unlock-domains.txt" -o "$ADMIN_APP_DIR/config/unlock-domains.txt"
     elif command -v wget >/dev/null 2>&1; then
       wget -qO "$ADMIN_APP_DIR/web/admin.py" "$RAW_BASE/web/admin.py"
       wget -qO "$FIREWALL_SYNC_SCRIPT" "$RAW_BASE/scripts/sync-firewall.sh"
+      install -d -m 0755 "$ADMIN_APP_DIR/config"
+      wget -qO "$ADMIN_APP_DIR/config/unlock-domains.txt" "$RAW_BASE/config/unlock-domains.txt"
     else
       warn "未找到 curl 或 wget，跳过 Web 面板安装。"
       return
@@ -252,6 +299,7 @@ print_summary() {
 监听端口: $DNS_PORT
 上游 DNS: $UPSTREAM_DNS
 客户端白名单: ${CLIENT_ALLOWLIST:-未设置}
+预置解锁目标 IP: ${UNLOCK_TARGET_IP:-未设置}
 主配置:   $DNSMASQ_CONFIG
 解析记录: $RECORDS_FILE
 兼容 hosts: $CONFIG_DIR/hosts

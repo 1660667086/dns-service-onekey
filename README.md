@@ -44,6 +44,14 @@ curl -fsSL https://raw.githubusercontent.com/你的用户名/dns-service-onekey/
 
 安装后也可以直接在 Web 面板里的“允许 IP”页面增删这些服务器 IP，不需要重新安装。
 
+如果想像常见 DNS 解锁项目一样，服务端预置域名规则，日常只管理允许使用的服务器 IP，可以安装时指定 `UNLOCK_TARGET_IP`。把 `154.64.225.137` 换成你的解锁/中转 IP：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/1660667086/dns-service-onekey/main/bootstrap.sh | sudo env GITHUB_REPO=1660667086/dns-service-onekey LISTEN_ADDR=0.0.0.0 ADMIN_BIND=0.0.0.0 UNLOCK_TARGET_IP=154.64.225.137 bash
+```
+
+这样会自动把 `config/unlock-domains.txt` 里的域名写成 `address=/域名/154.64.225.137`。之后你只需要在面板的 `允许 IP` 里加客户端服务器公网 IP。
+
 安装完成后会同时启动 Web 管理面板，默认只监听本机：
 
 ```text
@@ -84,6 +92,7 @@ sudo LISTEN_ADDR=0.0.0.0 \
 | `ADMIN_BIND` | `127.0.0.1` | Web 管理面板监听地址 |
 | `ADMIN_PORT` | `8080` | Web 管理面板端口 |
 | `CLIENT_ALLOWLIST` | 空 | 允许访问 DNS 的客户端 IP，多个用英文逗号分隔 |
+| `UNLOCK_TARGET_IP` | 空 | 预置解锁域名要解析到的目标 IP |
 | `GITHUB_REPO` | 空 | GitHub 仓库，例如 `你的用户名/dns-service-onekey` |
 | `REPO_URL` | 空 | 完整 Git 仓库地址 |
 | `BRANCH` | `main` | 要安装的分支 |
@@ -182,6 +191,20 @@ printf 'nameserver 8.8.8.8\n' | sudo tee /etc/resolv.conf
 ```
 
 云服务器还需要在云厂商安全组里放行 DNS 服务器的 `53/udp` 和 `53/tcp`，来源只填你的客户端服务器 IP，不要开放给全网。
+
+客户端服务器也可以用一条命令自动设置 DNS。把 `8.8.8.8` 换成你的 DNS 解锁服务器 IP：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/1660667086/dns-service-onekey/main/client-set-dns.sh | sudo env DNS_SERVER=8.8.8.8 bash
+```
+
+所以最简流程是：
+
+```text
+1. DNS 解锁服务器安装时设置 UNLOCK_TARGET_IP
+2. Web 面板只添加允许使用的客户端服务器 IP
+3. 客户端服务器运行 client-set-dns.sh 一次
+```
 
 ## 更新已安装服务
 
