@@ -3,13 +3,17 @@ set -euo pipefail
 
 SERVICE_NAME="dnsmasq"
 ADMIN_SERVICE_NAME="dns-service-admin"
+PROXY_SERVICE_NAME="dns-unlock-proxy"
 CONFIG_DIR="/etc/dns-service"
 DNSMASQ_CONFIG="/etc/dnsmasq.d/github-dns-service.conf"
 ADMIN_APP_DIR="/opt/dns-service-onekey"
 ADMIN_SERVICE_FILE="/etc/systemd/system/${ADMIN_SERVICE_NAME}.service"
+PROXY_SERVICE_FILE="/etc/systemd/system/${PROXY_SERVICE_NAME}.service"
 CLIENTS_FILE="$CONFIG_DIR/clients.allow"
 RECORDS_FILE="$CONFIG_DIR/conf.d/records.conf"
 FIREWALL_SYNC_SCRIPT="$ADMIN_APP_DIR/scripts/sync-firewall.sh"
+PROXY_SCRIPT="$ADMIN_APP_DIR/scripts/sni-proxy.py"
+UNLOCK_DOMAINS_FILE="$ADMIN_APP_DIR/config/unlock-domains.txt"
 
 LISTEN_ADDR="${LISTEN_ADDR:-0.0.0.0}"
 DNS_PORT="${DNS_PORT:-53}"
@@ -245,17 +249,20 @@ install_admin_panel() {
   if [ -n "$script_dir" ] && [ -f "$script_dir/web/admin.py" ]; then
     install -m 0755 "$script_dir/web/admin.py" "$ADMIN_APP_DIR/web/admin.py"
     install -m 0755 "$script_dir/scripts/sync-firewall.sh" "$FIREWALL_SYNC_SCRIPT"
+    install -m 0755 "$script_dir/scripts/sni-proxy.py" "$PROXY_SCRIPT"
     install -d -m 0755 "$ADMIN_APP_DIR/config"
     install -m 0644 "$script_dir/config/unlock-domains.txt" "$ADMIN_APP_DIR/config/unlock-domains.txt"
   elif [ -n "$RAW_BASE" ]; then
     if command -v curl >/dev/null 2>&1; then
       curl -fsSL "$RAW_BASE/web/admin.py" -o "$ADMIN_APP_DIR/web/admin.py"
       curl -fsSL "$RAW_BASE/scripts/sync-firewall.sh" -o "$FIREWALL_SYNC_SCRIPT"
+      curl -fsSL "$RAW_BASE/scripts/sni-proxy.py" -o "$PROXY_SCRIPT"
       install -d -m 0755 "$ADMIN_APP_DIR/config"
       curl -fsSL "$RAW_BASE/config/unlock-domains.txt" -o "$ADMIN_APP_DIR/config/unlock-domains.txt"
     elif command -v wget >/dev/null 2>&1; then
       wget -qO "$ADMIN_APP_DIR/web/admin.py" "$RAW_BASE/web/admin.py"
       wget -qO "$FIREWALL_SYNC_SCRIPT" "$RAW_BASE/scripts/sync-firewall.sh"
+      wget -qO "$PROXY_SCRIPT" "$RAW_BASE/scripts/sni-proxy.py"
       install -d -m 0755 "$ADMIN_APP_DIR/config"
       wget -qO "$ADMIN_APP_DIR/config/unlock-domains.txt" "$RAW_BASE/config/unlock-domains.txt"
     else
@@ -264,6 +271,7 @@ install_admin_panel() {
     fi
     chmod 0755 "$ADMIN_APP_DIR/web/admin.py"
     chmod 0755 "$FIREWALL_SYNC_SCRIPT"
+    chmod 0755 "$PROXY_SCRIPT"
   else
     warn "未找到 web/admin.py。若使用 curl 管道安装，请设置 RAW_BASE，例如：sudo env RAW_BASE=https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main bash"
     return
@@ -307,6 +315,31 @@ EOF
   "$FIREWALL_SYNC_SCRIPT" || true
 }
 
+install_unlock_proxy() {
+  info "安装 DNS 解锁 SNI/HTTP 转发服务..."
+  cat >"$PROXY_SERVICE_FILE" <<EOF
+[Unit]
+Description=DNS Unlock SNI/HTTP Proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=DNS_UNLOCK_DOMAINS_FILE=$UNLOCK_DOMAINS_FILE
+Environment=DNS_UNLOCK_PROXY_BIND=0.0.0.0
+ExecStart=/usr/bin/python3 $PROXY_SCRIPT
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable "$PROXY_SERVICE_NAME"
+  systemctl restart "$PROXY_SERVICE_NAME"
+}
+
 print_summary() {
   cat <<EOF
 
@@ -327,8 +360,10 @@ Web 面板: http://$ADMIN_BIND:$ADMIN_PORT
 常用命令:
   systemctl status dnsmasq
   systemctl status dns-service-admin
+  systemctl status dns-unlock-proxy
   journalctl -u dnsmasq -f
   journalctl -u dns-service-admin -f
+  journalctl -u dns-unlock-proxy -f
   dig @$LISTEN_ADDR example.com -p $DNS_PORT
 
 添加自定义解析:
@@ -353,6 +388,7 @@ main() {
   open_firewall_if_available
   enable_service
   install_admin_panel
+  install_unlock_proxy
   print_summary
 }
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 CLIENTS_FILE="${CLIENTS_FILE:-/etc/dns-service/clients.allow}"
-DNS_PORT="${DNS_PORT:-53}"
+ALLOW_PORTS="${ALLOW_PORTS:-53,80,443}"
 CHAIN="DNS_SERVICE_ALLOW"
 
 info() {
@@ -26,8 +26,9 @@ rule_exists() {
 
 ensure_jump_rule() {
   local proto="$1"
-  if ! rule_exists INPUT -p "$proto" --dport "$DNS_PORT" -j "$CHAIN"; then
-    iptables -I INPUT -p "$proto" --dport "$DNS_PORT" -j "$CHAIN"
+  local port="$2"
+  if ! rule_exists INPUT -p "$proto" --dport "$port" -j "$CHAIN"; then
+    iptables -I INPUT -p "$proto" --dport "$port" -j "$CHAIN"
   fi
 }
 
@@ -40,8 +41,15 @@ main() {
     iptables -N "$CHAIN"
   fi
 
-  ensure_jump_rule udp
-  ensure_jump_rule tcp
+  IFS=',' read -r -a ports <<<"$ALLOW_PORTS"
+  for port in "${ports[@]}"; do
+    port="${port//[[:space:]]/}"
+    [ -z "$port" ] && continue
+    ensure_jump_rule tcp "$port"
+    if [ "$port" = "53" ]; then
+      ensure_jump_rule udp "$port"
+    fi
+  done
   iptables -F "$CHAIN"
 
   iptables -A "$CHAIN" -s 127.0.0.1/32 -j ACCEPT
@@ -54,7 +62,7 @@ main() {
   done <"$CLIENTS_FILE"
 
   iptables -A "$CHAIN" -j DROP
-  info "DNS 客户端白名单已同步到 iptables。"
+  info "DNS 解锁客户端白名单已同步到 iptables，端口：$ALLOW_PORTS。"
 }
 
 main "$@"

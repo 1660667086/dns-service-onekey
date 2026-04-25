@@ -5,6 +5,7 @@ CONFIG_DIR="/etc/dns-service"
 DNSMASQ_CONFIG="/etc/dnsmasq.d/github-dns-service.conf"
 ADMIN_APP_DIR="/opt/dns-service-onekey"
 ADMIN_SERVICE_FILE="/etc/systemd/system/dns-service-admin.service"
+PROXY_SERVICE_FILE="/etc/systemd/system/dns-unlock-proxy.service"
 FIREWALL_CHAIN="DNS_SERVICE_ALLOW"
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -14,11 +15,15 @@ fi
 
 systemctl disable --now dnsmasq 2>/dev/null || true
 systemctl disable --now dns-service-admin 2>/dev/null || true
+systemctl disable --now dns-unlock-proxy 2>/dev/null || true
 rm -f "$DNSMASQ_CONFIG"
 rm -f "$ADMIN_SERVICE_FILE"
+rm -f "$PROXY_SERVICE_FILE"
 if command -v iptables >/dev/null 2>&1; then
+  for port in 53 80 443; do
+    iptables -D INPUT -p tcp --dport "$port" -j "$FIREWALL_CHAIN" 2>/dev/null || true
+  done
   iptables -D INPUT -p udp --dport 53 -j "$FIREWALL_CHAIN" 2>/dev/null || true
-  iptables -D INPUT -p tcp --dport 53 -j "$FIREWALL_CHAIN" 2>/dev/null || true
   iptables -F "$FIREWALL_CHAIN" 2>/dev/null || true
   iptables -X "$FIREWALL_CHAIN" 2>/dev/null || true
 fi
