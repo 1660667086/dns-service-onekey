@@ -164,6 +164,7 @@ INDEX_HTML = r"""<!doctype html>
     .login h1 { font-size: 21px; }
     .hidden { display: none !important; }
     .section.hidden { display: none !important; }
+    #recordsTab, #recordsSection { display: none !important; }
     .toast {
       position: fixed;
       right: 18px;
@@ -202,14 +203,14 @@ INDEX_HTML = r"""<!doctype html>
   <section id="appView" class="hidden">
     <header>
       <div class="wrap topbar">
-        <h1>DNS 管理面板</h1>
+        <h1>DNS 允许 IP 管理</h1>
         <button id="logoutBtn" class="secondary">退出</button>
       </div>
     </header>
     <main class="wrap">
       <nav class="tabs">
         <button class="tab active" id="recordsTab" type="button">解析记录</button>
-        <button class="tab" id="clientsTab" type="button">允许 IP</button>
+        <button class="tab active" id="clientsTab" type="button">允许 IP</button>
       </nav>
 
       <section id="recordsSection" class="section">
@@ -235,7 +236,7 @@ INDEX_HTML = r"""<!doctype html>
         </section>
       </section>
 
-      <section id="clientsSection" class="section hidden">
+      <section id="clientsSection" class="section">
         <form id="clientForm" class="toolbar">
           <label>允许访问 DNS 的 IP
             <input id="clientInput" required placeholder="1.2.3.4 或 1.2.3.0/24">

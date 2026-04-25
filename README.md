@@ -138,19 +138,9 @@ ssh -L 8080:127.0.0.1:8080 root@服务器IP
 http://127.0.0.1:8080
 ```
 
-登录后有两个页面：
+登录后只管理 `允许 IP`：添加、编辑、删除允许使用这个 DNS 的服务器 IP。
 
-- `解析记录`：添加、编辑、删除域名解析
-- `允许 IP`：添加、编辑、删除允许使用这个 DNS 的服务器 IP
-
-解析记录示例：
-
-```text
-nas.lan -> 10.0.0.10
-router.lan -> 192.168.1.1
-```
-
-每次保存后，面板会自动重写 `/etc/dns-service/conf.d/records.conf` 并重启 `dnsmasq`。记录会使用 `address=/域名/IP` 格式，效果接近你那台可用服务器的 `custom_netflix.conf`。
+域名解锁规则不在面板里改。安装时设置 `UNLOCK_TARGET_IP` 后，服务端会自动把 `config/unlock-domains.txt` 里的域名写入 `/etc/dns-service/conf.d/records.conf`，格式是 `address=/域名/IP`，效果接近你那台可用服务器的 `custom_netflix.conf`。
 
 允许 IP 示例：
 
