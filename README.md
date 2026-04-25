@@ -8,12 +8,20 @@
 - CentOS / Rocky Linux / AlmaLinux / Fedora
 - 需要 `systemd`
 
-## 一键安装
+## 服务器拉取安装
+
+推荐用这个方式。服务器会自动从 GitHub 拉取完整仓库到 `/opt/dns-service-onekey-src`，然后安装 DNS 服务和 Web 管理面板。
 
 把仓库推到 GitHub 后，将下面的地址替换成你的 GitHub 用户名和仓库名：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main/install.sh | sudo env RAW_BASE=https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main bash
+curl -fsSL https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main/bootstrap.sh | sudo env GITHUB_REPO=你的用户名/dns-service-onekey bash
+```
+
+如果你想指定完整仓库地址：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main/bootstrap.sh | sudo env REPO_URL=https://github.com/你的用户名/dns-service-onekey.git bash
 ```
 
 默认只监听本机：
@@ -25,7 +33,7 @@ curl -fsSL https://raw.githubusercontent.com/你的用户名/dns-service-onekey/
 如果要让局域网或公网访问，请明确指定监听地址：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main/install.sh | sudo env RAW_BASE=https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main LISTEN_ADDR=0.0.0.0 bash
+curl -fsSL https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main/bootstrap.sh | sudo env GITHUB_REPO=你的用户名/dns-service-onekey LISTEN_ADDR=0.0.0.0 bash
 ```
 
 安装完成后会同时启动 Web 管理面板，默认只监听本机：
@@ -43,7 +51,7 @@ sudo cat /etc/dns-service/admin.token
 如果要让局域网访问 Web 面板：
 
 ```bash
-sudo ADMIN_BIND=0.0.0.0 ADMIN_PORT=8080 bash install.sh
+curl -fsSL https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main/bootstrap.sh | sudo env GITHUB_REPO=你的用户名/dns-service-onekey ADMIN_BIND=0.0.0.0 ADMIN_PORT=8080 bash
 ```
 
 ## 自定义安装参数
@@ -67,7 +75,20 @@ sudo LISTEN_ADDR=0.0.0.0 \
 | `LOG_QUERIES` | `0` | 设为 `1` 后记录查询日志 |
 | `ADMIN_BIND` | `127.0.0.1` | Web 管理面板监听地址 |
 | `ADMIN_PORT` | `8080` | Web 管理面板端口 |
-| `RAW_BASE` | 空 | 使用 `curl | bash` 安装时，用来下载 Web 面板文件 |
+| `GITHUB_REPO` | 空 | GitHub 仓库，例如 `你的用户名/dns-service-onekey` |
+| `REPO_URL` | 空 | 完整 Git 仓库地址 |
+| `BRANCH` | `main` | 要安装的分支 |
+| `INSTALL_DIR` | `/opt/dns-service-onekey-src` | 服务器上的源码拉取目录 |
+
+## 直接运行 install.sh
+
+如果你只想通过 raw 文件安装，也可以运行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main/install.sh | sudo env RAW_BASE=https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main bash
+```
+
+不过更推荐使用 `bootstrap.sh`，因为它会把完整仓库拉到服务器上，后续更新也更方便。
 
 ## Git clone 安装
 
