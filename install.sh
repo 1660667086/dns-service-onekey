@@ -7,6 +7,8 @@ CONFIG_DIR="/etc/dns-service"
 DNSMASQ_CONFIG="/etc/dnsmasq.d/github-dns-service.conf"
 ADMIN_APP_DIR="/opt/dns-service-onekey"
 ADMIN_SERVICE_FILE="/etc/systemd/system/${ADMIN_SERVICE_NAME}.service"
+CLIENTS_FILE="$CONFIG_DIR/clients.allow"
+FIREWALL_SYNC_SCRIPT="$ADMIN_APP_DIR/scripts/sync-firewall.sh"
 
 LISTEN_ADDR="${LISTEN_ADDR:-127.0.0.1}"
 DNS_PORT="${DNS_PORT:-53}"
@@ -51,17 +53,17 @@ detect_package_manager() {
 
 install_dnsmasq() {
   local pm="$1"
-  info "安装 dnsmasq 与 Python..."
+  info "安装 dnsmasq、Python 与防火墙工具..."
   case "$pm" in
     apt)
       apt-get update
-      DEBIAN_FRONTEND=noninteractive apt-get install -y dnsmasq python3
+      DEBIAN_FRONTEND=noninteractive apt-get install -y dnsmasq python3 iptables
       ;;
     dnf)
-      dnf install -y dnsmasq python3
+      dnf install -y dnsmasq python3 iptables
       ;;
     yum)
-      yum install -y dnsmasq python3
+      yum install -y dnsmasq python3 iptables
       ;;
   esac
 }
@@ -85,7 +87,18 @@ write_dns_service_files() {
   install -d -m 0755 /etc/dnsmasq.d
   install -d -m 0755 "$CONFIG_DIR/conf.d"
   touch "$CONFIG_DIR/hosts"
+  touch "$CLIENTS_FILE"
   chmod 0644 "$CONFIG_DIR/hosts"
+  chmod 0644 "$CLIENTS_FILE"
+
+  if [ -n "$CLIENT_ALLOWLIST" ]; then
+    : >"$CLIENTS_FILE"
+    IFS=',' read -r -a clients <<<"$CLIENT_ALLOWLIST"
+    for client in "${clients[@]}"; do
+      client="${client//[[:space:]]/}"
+      [ -n "$client" ] && echo "$client" >>"$CLIENTS_FILE"
+    done
+  fi
 
   {
     echo "# Managed by dns-service-onekey"
@@ -111,6 +124,11 @@ write_dns_service_files() {
 }
 
 open_firewall_if_available() {
+  if [ -n "$CLIENT_ALLOWLIST" ] && [ -x "$FIREWALL_SYNC_SCRIPT" ]; then
+    "$FIREWALL_SYNC_SCRIPT" || true
+    return
+  fi
+
   if command -v ufw >/dev/null 2>&1 && ufw status | grep -qi "Status: active"; then
     if [ -n "$CLIENT_ALLOWLIST" ]; then
       info "按客户端白名单开放 ufw DNS 端口..."
@@ -159,22 +177,27 @@ enable_service() {
 install_admin_panel() {
   info "安装 Web 管理面板..."
   install -d -m 0755 "$ADMIN_APP_DIR/web"
+  install -d -m 0755 "$ADMIN_APP_DIR/scripts"
 
   local script_dir=""
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
 
   if [ -n "$script_dir" ] && [ -f "$script_dir/web/admin.py" ]; then
     install -m 0755 "$script_dir/web/admin.py" "$ADMIN_APP_DIR/web/admin.py"
+    install -m 0755 "$script_dir/scripts/sync-firewall.sh" "$FIREWALL_SYNC_SCRIPT"
   elif [ -n "$RAW_BASE" ]; then
     if command -v curl >/dev/null 2>&1; then
       curl -fsSL "$RAW_BASE/web/admin.py" -o "$ADMIN_APP_DIR/web/admin.py"
+      curl -fsSL "$RAW_BASE/scripts/sync-firewall.sh" -o "$FIREWALL_SYNC_SCRIPT"
     elif command -v wget >/dev/null 2>&1; then
       wget -qO "$ADMIN_APP_DIR/web/admin.py" "$RAW_BASE/web/admin.py"
+      wget -qO "$FIREWALL_SYNC_SCRIPT" "$RAW_BASE/scripts/sync-firewall.sh"
     else
       warn "未找到 curl 或 wget，跳过 Web 面板安装。"
       return
     fi
     chmod 0755 "$ADMIN_APP_DIR/web/admin.py"
+    chmod 0755 "$FIREWALL_SYNC_SCRIPT"
   else
     warn "未找到 web/admin.py。若使用 curl 管道安装，请设置 RAW_BASE，例如：sudo env RAW_BASE=https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main bash"
     return
@@ -201,6 +224,8 @@ Environment=DNS_HOSTS_FILE=$CONFIG_DIR/hosts
 Environment=DNS_ADMIN_TOKEN_FILE=$CONFIG_DIR/admin.token
 Environment=DNS_ADMIN_BIND=$ADMIN_BIND
 Environment=DNS_ADMIN_PORT=$ADMIN_PORT
+Environment=DNS_CLIENTS_FILE=$CLIENTS_FILE
+Environment=DNS_FIREWALL_SYNC_CMD=$FIREWALL_SYNC_SCRIPT
 ExecStart=/usr/bin/python3 $ADMIN_APP_DIR/web/admin.py
 Restart=on-failure
 RestartSec=3
@@ -212,6 +237,7 @@ EOF
   systemctl daemon-reload
   systemctl enable "$ADMIN_SERVICE_NAME"
   systemctl restart "$ADMIN_SERVICE_NAME"
+  "$FIREWALL_SYNC_SCRIPT" || true
 }
 
 print_summary() {
@@ -225,6 +251,7 @@ print_summary() {
 客户端白名单: ${CLIENT_ALLOWLIST:-未设置}
 主配置:   $DNSMASQ_CONFIG
 自定义 hosts: $CONFIG_DIR/hosts
+客户端白名单文件: $CLIENTS_FILE
 Web 面板: http://$ADMIN_BIND:$ADMIN_PORT
 管理 Token: $CONFIG_DIR/admin.token
 

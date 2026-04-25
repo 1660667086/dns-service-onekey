@@ -14,10 +14,12 @@ from urllib.parse import urlparse
 
 
 HOSTS_FILE = Path(os.environ.get("DNS_HOSTS_FILE", "/etc/dns-service/hosts"))
+CLIENTS_FILE = Path(os.environ.get("DNS_CLIENTS_FILE", "/etc/dns-service/clients.allow"))
 TOKEN_FILE = Path(os.environ.get("DNS_ADMIN_TOKEN_FILE", "/etc/dns-service/admin.token"))
 BIND = os.environ.get("DNS_ADMIN_BIND", "127.0.0.1")
 PORT = int(os.environ.get("DNS_ADMIN_PORT", "8080"))
 RESTART_CMD = os.environ.get("DNS_RESTART_CMD", "systemctl restart dnsmasq")
+FIREWALL_SYNC_CMD = os.environ.get("DNS_FIREWALL_SYNC_CMD", "/opt/dns-service-onekey/scripts/sync-firewall.sh")
 
 HOST_RE = re.compile(
     r"^(?=.{1,253}$)([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*"
@@ -67,6 +69,22 @@ INDEX_HTML = r"""<!doctype html>
     }
     h1 { margin: 0; font-size: 22px; font-weight: 750; letter-spacing: 0; }
     main { padding: 24px 0 40px; }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .tab {
+      background: #fff;
+      color: var(--text);
+      border-color: var(--line);
+    }
+    .tab.active {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
     .toolbar {
       display: grid;
       grid-template-columns: 1fr 1fr 1.2fr auto;
@@ -144,6 +162,7 @@ INDEX_HTML = r"""<!doctype html>
     }
     .login h1 { font-size: 21px; }
     .hidden { display: none !important; }
+    .section.hidden { display: none !important; }
     .toast {
       position: fixed;
       right: 18px;
@@ -182,30 +201,58 @@ INDEX_HTML = r"""<!doctype html>
   <section id="appView" class="hidden">
     <header>
       <div class="wrap topbar">
-        <h1>DNS 解析管理</h1>
+        <h1>DNS 管理面板</h1>
         <button id="logoutBtn" class="secondary">退出</button>
       </div>
     </header>
     <main class="wrap">
-      <form id="recordForm" class="toolbar">
-        <label>域名
-          <input id="hostInput" required placeholder="nas.lan">
-        </label>
-        <label>IP 地址
-          <input id="ipInput" required placeholder="10.0.0.10">
-        </label>
-        <label>备注
-          <input id="commentInput" placeholder="NAS">
-        </label>
-        <button id="saveBtn" type="submit">添加</button>
-      </form>
+      <nav class="tabs">
+        <button class="tab active" id="recordsTab" type="button">解析记录</button>
+        <button class="tab" id="clientsTab" type="button">允许 IP</button>
+      </nav>
 
-      <section class="panel">
-        <div class="panel-head">
-          <div class="status" id="statusText">读取中...</div>
-          <button id="refreshBtn" class="secondary">刷新</button>
-        </div>
-        <div id="tableMount"></div>
+      <section id="recordsSection" class="section">
+        <form id="recordForm" class="toolbar">
+          <label>域名
+            <input id="hostInput" required placeholder="nas.lan">
+          </label>
+          <label>IP 地址
+            <input id="ipInput" required placeholder="10.0.0.10">
+          </label>
+          <label>备注
+            <input id="commentInput" placeholder="NAS">
+          </label>
+          <button id="saveBtn" type="submit">添加</button>
+        </form>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div class="status" id="statusText">读取中...</div>
+            <button id="refreshBtn" class="secondary">刷新</button>
+          </div>
+          <div id="tableMount"></div>
+        </section>
+      </section>
+
+      <section id="clientsSection" class="section hidden">
+        <form id="clientForm" class="toolbar">
+          <label>允许访问 DNS 的 IP
+            <input id="clientInput" required placeholder="1.2.3.4 或 1.2.3.0/24">
+          </label>
+          <label>备注
+            <input id="clientCommentInput" placeholder="server-a">
+          </label>
+          <span></span>
+          <button id="clientSaveBtn" type="submit">添加</button>
+        </form>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div class="status" id="clientStatusText">读取中...</div>
+            <button id="clientRefreshBtn" class="secondary">刷新</button>
+          </div>
+          <div id="clientTableMount"></div>
+        </section>
       </section>
     </main>
   </section>
@@ -214,6 +261,7 @@ INDEX_HTML = r"""<!doctype html>
   <script>
     const $ = (id) => document.getElementById(id);
     let editingHost = null;
+    let editingClient = null;
 
     function token() { return localStorage.getItem("dns_admin_token") || ""; }
     function toast(msg) {
@@ -245,14 +293,22 @@ INDEX_HTML = r"""<!doctype html>
     }
     async function load() {
       try {
-        const data = await api("/api/records");
-        $("statusText").innerHTML = `<strong>${data.count}</strong> 条解析记录，保存后自动重启 dnsmasq`;
-        render(data.records);
+        await Promise.all([loadRecords(), loadClients()]);
       } catch (err) {
         localStorage.removeItem("dns_admin_token");
         showLogin();
         toast(err.message);
       }
+    }
+    async function loadRecords() {
+      const data = await api("/api/records");
+      $("statusText").innerHTML = `<strong>${data.count}</strong> 条解析记录，保存后自动重启 dnsmasq`;
+      render(data.records);
+    }
+    async function loadClients() {
+      const data = await api("/api/clients");
+      $("clientStatusText").innerHTML = `<strong>${data.count}</strong> 个允许 IP，保存后自动同步防火墙`;
+      renderClients(data.clients);
     }
     function render(records) {
       if (!records.length) {
@@ -289,7 +345,43 @@ INDEX_HTML = r"""<!doctype html>
         if (!confirm(`删除 ${btn.dataset.delete} ?`)) return;
         await api(`/api/records/${encodeURIComponent(btn.dataset.delete)}`, { method: "DELETE" });
         toast("已删除并重启 DNS 服务");
-        load();
+        loadRecords();
+      });
+    }
+    function renderClients(clients) {
+      if (!clients.length) {
+        $("clientTableMount").innerHTML = `<div class="empty">暂无允许 IP，外部服务器不能使用此 DNS</div>`;
+        return;
+      }
+      $("clientTableMount").innerHTML = `
+        <table>
+          <thead><tr><th>允许 IP / 网段</th><th>备注</th><th></th></tr></thead>
+          <tbody>
+            ${clients.map(c => `
+              <tr>
+                <td>${escapeHtml(c.client)}</td>
+                <td>${escapeHtml(c.comment || "")}</td>
+                <td class="actions">
+                  <button class="secondary" data-client-edit="${escapeHtml(c.client)}">编辑</button>
+                  <button class="danger" data-client-delete="${escapeHtml(c.client)}">删除</button>
+                </td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>`;
+      document.querySelectorAll("[data-client-edit]").forEach(btn => btn.onclick = () => {
+        const row = clients.find(c => c.client === btn.dataset.clientEdit);
+        editingClient = row.client;
+        $("clientInput").value = row.client;
+        $("clientCommentInput").value = row.comment || "";
+        $("clientSaveBtn").textContent = "保存";
+        $("clientInput").focus();
+      });
+      document.querySelectorAll("[data-client-delete]").forEach(btn => btn.onclick = async () => {
+        if (!confirm(`移除 ${btn.dataset.clientDelete} ?`)) return;
+        await api(`/api/clients/${encodeURIComponent(btn.dataset.clientDelete)}`, { method: "DELETE" });
+        toast("已同步允许 IP");
+        loadClients();
       });
     }
     function escapeHtml(text) {
@@ -304,6 +396,15 @@ INDEX_HTML = r"""<!doctype html>
       showLogin();
     };
     $("refreshBtn").onclick = load;
+    $("clientRefreshBtn").onclick = loadClients;
+    $("recordsTab").onclick = () => switchTab("records");
+    $("clientsTab").onclick = () => switchTab("clients");
+    function switchTab(name) {
+      $("recordsSection").classList.toggle("hidden", name !== "records");
+      $("clientsSection").classList.toggle("hidden", name !== "clients");
+      $("recordsTab").classList.toggle("active", name === "records");
+      $("clientsTab").classList.toggle("active", name === "clients");
+    }
     $("recordForm").onsubmit = async (event) => {
       event.preventDefault();
       const body = JSON.stringify({
@@ -318,7 +419,22 @@ INDEX_HTML = r"""<!doctype html>
       $("recordForm").reset();
       $("saveBtn").textContent = "添加";
       toast("已保存并重启 DNS 服务");
-      load();
+      loadRecords();
+    };
+    $("clientForm").onsubmit = async (event) => {
+      event.preventDefault();
+      const body = JSON.stringify({
+        client: $("clientInput").value.trim(),
+        comment: $("clientCommentInput").value.trim()
+      });
+      const path = editingClient ? `/api/clients/${encodeURIComponent(editingClient)}` : "/api/clients";
+      const method = editingClient ? "PUT" : "POST";
+      await api(path, { method, body });
+      editingClient = null;
+      $("clientForm").reset();
+      $("clientSaveBtn").textContent = "添加";
+      toast("已同步允许 IP");
+      loadClients();
     };
     if (token()) showApp(); else showLogin();
   </script>
@@ -365,6 +481,34 @@ def write_hosts(records):
     os.replace(tmp_name, HOSTS_FILE)
 
 
+def parse_clients():
+    CLIENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CLIENTS_FILE.touch(exist_ok=True)
+    clients = []
+    for line in CLIENTS_FILE.read_text(encoding="utf-8").splitlines():
+        raw = line.strip()
+        if not raw or raw.startswith("#"):
+            continue
+        left, _, comment = raw.partition("#")
+        parts = left.split()
+        if not parts:
+            continue
+        clients.append({"client": parts[0], "comment": comment.strip()})
+    return sorted(clients, key=lambda item: item["client"])
+
+
+def write_clients(clients):
+    lines = ["# Managed by DNS Web Admin"]
+    for client in sorted(clients, key=lambda item: item["client"]):
+        comment = f" # {client['comment']}" if client.get("comment") else ""
+        lines.append(f"{client['client']}{comment}")
+
+    fd, tmp_name = tempfile.mkstemp(prefix=".clients.", dir=str(CLIENTS_FILE.parent), text=True)
+    with os.fdopen(fd, "w", encoding="utf-8") as tmp:
+        tmp.write("\n".join(lines) + "\n")
+    os.replace(tmp_name, CLIENTS_FILE)
+
+
 def validate_record(record):
     host = str(record.get("host", "")).strip().lower()
     ip = str(record.get("ip", "")).strip()
@@ -380,8 +524,30 @@ def validate_record(record):
     return {"host": host, "ip": ip, "comment": comment}
 
 
+def validate_client(record):
+    client = str(record.get("client", "")).strip()
+    comment = str(record.get("comment", "")).strip()
+    try:
+        if "/" in client:
+            parsed = ipaddress.ip_network(client, strict=False)
+        else:
+            parsed = ipaddress.ip_address(client)
+    except ValueError as exc:
+        raise ValueError("客户端 IP 或网段格式不正确") from exc
+    if parsed.version != 4:
+        raise ValueError("客户端白名单目前只支持 IPv4")
+    normalized = str(parsed)
+    if len(comment) > 120:
+        raise ValueError("备注不能超过 120 个字符")
+    return {"client": normalized, "comment": comment}
+
+
 def restart_dnsmasq():
     subprocess.run(RESTART_CMD.split(), check=True)
+
+
+def sync_firewall():
+    subprocess.run(FIREWALL_SYNC_CMD.split(), check=True)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -400,10 +566,37 @@ class Handler(BaseHTTPRequestHandler):
                 records = parse_hosts()
             self.send_json({"records": records, "count": len(records)})
             return
+        if path == "/api/clients":
+            if not self.authorized():
+                self.send_json({"error": "未授权"}, HTTPStatus.UNAUTHORIZED)
+                return
+            with LOCK:
+                clients = parse_clients()
+            self.send_json({"clients": clients, "count": len(clients)})
+            return
         self.send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
 
     def do_POST(self):
-        if urlparse(self.path).path != "/api/records":
+        path = urlparse(self.path).path
+        if path == "/api/clients":
+            if not self.authorized():
+                self.send_json({"error": "未授权"}, HTTPStatus.UNAUTHORIZED)
+                return
+            try:
+                client = validate_client(self.read_json())
+                with LOCK:
+                    clients = parse_clients()
+                    if any(item["client"] == client["client"] for item in clients):
+                        raise ValueError("客户端 IP 已存在")
+                    clients.append(client)
+                    write_clients(clients)
+                    sync_firewall()
+                self.send_json({"ok": True})
+            except (ValueError, subprocess.CalledProcessError) as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        if path != "/api/records":
             self.send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
             return
         if not self.authorized():
@@ -423,6 +616,25 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
 
     def do_PUT(self):
+        client = self.client_from_path()
+        if client:
+            if not self.authorized():
+                self.send_json({"error": "未授权"}, HTTPStatus.UNAUTHORIZED)
+                return
+            try:
+                next_client = validate_client(self.read_json())
+                with LOCK:
+                    clients = [item for item in parse_clients() if item["client"] != client]
+                    if next_client["client"] != client and any(item["client"] == next_client["client"] for item in clients):
+                        raise ValueError("客户端 IP 已存在")
+                    clients.append(next_client)
+                    write_clients(clients)
+                    sync_firewall()
+                self.send_json({"ok": True})
+            except (ValueError, subprocess.CalledProcessError) as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
         host = self.record_host_from_path()
         if not host:
             self.send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
@@ -444,6 +656,21 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
 
     def do_DELETE(self):
+        client = self.client_from_path()
+        if client:
+            if not self.authorized():
+                self.send_json({"error": "未授权"}, HTTPStatus.UNAUTHORIZED)
+                return
+            try:
+                with LOCK:
+                    clients = [item for item in parse_clients() if item["client"] != client]
+                    write_clients(clients)
+                    sync_firewall()
+                self.send_json({"ok": True})
+            except subprocess.CalledProcessError as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
         host = self.record_host_from_path()
         if not host:
             self.send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
@@ -467,6 +694,14 @@ class Handler(BaseHTTPRequestHandler):
             return None
         from urllib.parse import unquote
         return unquote(path[len(prefix):]).strip().lower()
+
+    def client_from_path(self):
+        path = urlparse(self.path).path
+        prefix = "/api/clients/"
+        if not path.startswith(prefix):
+            return None
+        from urllib.parse import unquote
+        return unquote(path[len(prefix):]).strip()
 
     def authorized(self):
         auth = self.headers.get("Authorization", "")
@@ -498,6 +733,10 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     token = ensure_token()
+    try:
+        sync_firewall()
+    except subprocess.CalledProcessError as exc:
+        print(f"Firewall sync failed: {exc}")
     server = ThreadingHTTPServer((BIND, PORT), Handler)
     server.admin_token = token
     print(f"DNS admin listening on http://{BIND}:{PORT}")

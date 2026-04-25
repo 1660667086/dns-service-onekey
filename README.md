@@ -42,6 +42,8 @@ curl -fsSL https://raw.githubusercontent.com/你的用户名/dns-service-onekey/
 curl -fsSL https://raw.githubusercontent.com/你的用户名/dns-service-onekey/main/bootstrap.sh | sudo env GITHUB_REPO=你的用户名/dns-service-onekey LISTEN_ADDR=0.0.0.0 CLIENT_ALLOWLIST=1.2.3.4,5.6.7.8 bash
 ```
 
+安装后也可以直接在 Web 面板里的“允许 IP”页面增删这些服务器 IP，不需要重新安装。
+
 安装完成后会同时启动 Web 管理面板，默认只监听本机：
 
 ```text
@@ -127,7 +129,12 @@ ssh -L 8080:127.0.0.1:8080 root@服务器IP
 http://127.0.0.1:8080
 ```
 
-登录后可以在页面上添加、编辑、删除解析记录，例如：
+登录后有两个页面：
+
+- `解析记录`：添加、编辑、删除域名解析
+- `允许 IP`：添加、编辑、删除允许使用这个 DNS 的服务器 IP
+
+解析记录示例：
 
 ```text
 nas.lan -> 10.0.0.10
@@ -135,6 +142,16 @@ router.lan -> 192.168.1.1
 ```
 
 每次保存后，面板会自动重写 `/etc/dns-service/hosts` 并重启 `dnsmasq`。
+
+允许 IP 示例：
+
+```text
+1.2.3.4
+5.6.7.8
+10.0.0.0/24
+```
+
+每次保存后，面板会自动重写 `/etc/dns-service/clients.allow` 并同步防火墙规则。白名单为空时，外部服务器不能使用这个 DNS。
 
 ## 给其他服务器当 DNS
 
@@ -165,6 +182,16 @@ printf 'nameserver 8.8.8.8\n' | sudo tee /etc/resolv.conf
 ```
 
 云服务器还需要在云厂商安全组里放行 DNS 服务器的 `53/udp` 和 `53/tcp`，来源只填你的客户端服务器 IP，不要开放给全网。
+
+## 更新已安装服务
+
+服务器已经安装过时，重新运行 bootstrap 会自动拉取 GitHub 最新代码并覆盖服务文件：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/1660667086/dns-service-onekey/main/bootstrap.sh | sudo env GITHUB_REPO=1660667086/dns-service-onekey LISTEN_ADDR=0.0.0.0 bash
+```
+
+如果你想保留并继续使用已有白名单，直接重新运行即可；已有 `/etc/dns-service/clients.allow` 会保留。
 
 ## 添加自定义解析
 
