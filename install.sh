@@ -11,12 +11,12 @@ CLIENTS_FILE="$CONFIG_DIR/clients.allow"
 RECORDS_FILE="$CONFIG_DIR/conf.d/records.conf"
 FIREWALL_SYNC_SCRIPT="$ADMIN_APP_DIR/scripts/sync-firewall.sh"
 
-LISTEN_ADDR="${LISTEN_ADDR:-127.0.0.1}"
+LISTEN_ADDR="${LISTEN_ADDR:-0.0.0.0}"
 DNS_PORT="${DNS_PORT:-53}"
 UPSTREAM_DNS="${UPSTREAM_DNS:-1.1.1.1,8.8.8.8}"
 CACHE_SIZE="${CACHE_SIZE:-10000}"
 LOG_QUERIES="${LOG_QUERIES:-0}"
-ADMIN_BIND="${ADMIN_BIND:-127.0.0.1}"
+ADMIN_BIND="${ADMIN_BIND:-0.0.0.0}"
 ADMIN_PORT="${ADMIN_PORT:-8080}"
 CLIENT_ALLOWLIST="${CLIENT_ALLOWLIST:-}"
 UNLOCK_TARGET_IP="${UNLOCK_TARGET_IP:-}"
@@ -51,6 +51,23 @@ detect_package_manager() {
   else
     die "暂不支持当前系统：需要 apt、dnf 或 yum"
   fi
+}
+
+detect_public_ip() {
+  local ip=""
+  if command -v curl >/dev/null 2>&1; then
+    ip="$(curl -4fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
+    [ -z "$ip" ] && ip="$(curl -4fsS --max-time 5 https://ipv4.icanhazip.com 2>/dev/null | tr -d '[:space:]' || true)"
+  elif command -v wget >/dev/null 2>&1; then
+    ip="$(wget -4qO- --timeout=5 https://api.ipify.org 2>/dev/null || true)"
+    [ -z "$ip" ] && ip="$(wget -4qO- --timeout=5 https://ipv4.icanhazip.com 2>/dev/null | tr -d '[:space:]' || true)"
+  fi
+  if [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    echo "$ip"
+    return
+  fi
+  ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
+  echo "$ip"
 }
 
 install_dnsmasq() {
@@ -325,6 +342,11 @@ main() {
   require_root
   local pm
   pm="$(detect_package_manager)"
+  if [ -z "$UNLOCK_TARGET_IP" ]; then
+    UNLOCK_TARGET_IP="$(detect_public_ip)"
+    [ -n "$UNLOCK_TARGET_IP" ] || die "无法自动检测本机公网 IP，请手动设置 UNLOCK_TARGET_IP"
+    info "自动检测到解锁目标 IP: $UNLOCK_TARGET_IP"
+  fi
   stop_local_resolved_if_needed
   write_dns_service_files
   install_dnsmasq "$pm"
