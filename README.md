@@ -103,7 +103,7 @@ http://服务器IP:8080
 
 登录后只管理 `允许 IP`：添加、编辑、删除允许使用这个 DNS 的服务器 IP。
 
-域名解锁规则不在面板里改。安装时会自动检测本机公网 IP，并把 `config/unlock-domains.txt` 里的域名写入 `/etc/dns-service/conf.d/records.conf`，格式是 `address=/域名/IP`，效果接近你那台可用服务器的 `custom_netflix.conf`。
+域名解锁规则不在面板里改。安装时会自动检测本机公网 IP，并把 `config/proxy-domains.txt` 里的域名写入 `/etc/dnsmasq.d/custom_netflix.conf`，格式是 `address=/域名/IP`，效果接近你那台可用服务器的 `custom_netflix.conf`。
 
 这些域名会解析到新服务器自己，然后由 `sniproxy` 在 80/443 端口按 HTTP Host 或 TLS SNI 转发到真实目标站点。整个项目不读取、不复制、不修改 `154.64.225.137` 那台服务器的任何文件。
 
@@ -140,7 +140,7 @@ curl -fsSL https://raw.githubusercontent.com/1660667086/dns-service-onekey/main/
 安装后编辑：
 
 ```bash
-sudo nano /etc/dns-service/conf.d/records.conf
+sudo nano /etc/dnsmasq.d/custom_netflix.conf
 ```
 
 示例：

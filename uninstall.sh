@@ -2,7 +2,7 @@
 set -euo pipefail
 
 CONFIG_DIR="/etc/dns-service"
-DNSMASQ_CONFIG="/etc/dnsmasq.d/github-dns-service.conf"
+DNSMASQ_CONFIG="/etc/dnsmasq.d/custom_netflix.conf"
 SNIPROXY_CONFIG="/etc/sniproxy.conf"
 ADMIN_APP_DIR="/opt/dns-service-onekey"
 ADMIN_SERVICE_FILE="/etc/systemd/system/dns-service-admin.service"

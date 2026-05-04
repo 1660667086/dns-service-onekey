@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-RECORDS_FILE = Path(os.environ.get("DNS_RECORDS_FILE", "/etc/dns-service/conf.d/records.conf"))
+RECORDS_FILE = Path(os.environ.get("DNS_RECORDS_FILE", "/etc/dnsmasq.d/custom_netflix.conf"))
 LEGACY_HOSTS_FILE = Path(os.environ.get("DNS_HOSTS_FILE", "/etc/dns-service/hosts"))
 CLIENTS_FILE = Path(os.environ.get("DNS_CLIENTS_FILE", "/etc/dns-service/clients.allow"))
 TOKEN_FILE = Path(os.environ.get("DNS_ADMIN_TOKEN_FILE", "/etc/dns-service/admin.token"))

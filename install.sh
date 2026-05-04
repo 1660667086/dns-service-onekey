@@ -5,14 +5,14 @@ SERVICE_NAME="dnsmasq"
 ADMIN_SERVICE_NAME="dns-service-admin"
 PROXY_SERVICE_NAME="sniproxy"
 CONFIG_DIR="/etc/dns-service"
-DNSMASQ_CONFIG="/etc/dnsmasq.d/github-dns-service.conf"
+DNSMASQ_CONFIG="/etc/dnsmasq.d/custom_netflix.conf"
 SNIPROXY_CONFIG="/etc/sniproxy.conf"
 ADMIN_APP_DIR="/opt/dns-service-onekey"
 ADMIN_SERVICE_FILE="/etc/systemd/system/${ADMIN_SERVICE_NAME}.service"
 CLIENTS_FILE="$CONFIG_DIR/clients.allow"
-RECORDS_FILE="$CONFIG_DIR/conf.d/records.conf"
+RECORDS_FILE="$DNSMASQ_CONFIG"
 FIREWALL_SYNC_SCRIPT="$ADMIN_APP_DIR/scripts/sync-firewall.sh"
-UNLOCK_DOMAINS_FILE="$ADMIN_APP_DIR/config/unlock-domains.txt"
+UNLOCK_DOMAINS_FILE="$ADMIN_APP_DIR/config/proxy-domains.txt"
 
 LISTEN_ADDR="${LISTEN_ADDR:-0.0.0.0}"
 DNS_PORT="${DNS_PORT:-53}"
@@ -79,7 +79,14 @@ install_packages() {
   case "$pm" in
     apt)
       apt-get update
-      DEBIAN_FRONTEND=noninteractive apt-get install -y dnsmasq sniproxy python3 iptables
+      DEBIAN_FRONTEND=noninteractive apt-get install -y dnsmasq python3 iptables curl ca-certificates
+      if ! DEBIAN_FRONTEND=noninteractive apt-get install -y sniproxy; then
+        warn "系统源未提供 sniproxy，尝试安装原项目预编译 deb..."
+        local deb="/tmp/sniproxy_0.6.1_amd64.deb"
+        curl -fsSL https://github.com/myxuchangbin/dnsmasq_sniproxy_install/raw/master/sniproxy/sniproxy_0.6.1_amd64.deb -o "$deb"
+        dpkg -i "$deb" || DEBIAN_FRONTEND=noninteractive apt-get -f install -y
+        rm -f "$deb"
+      fi
       ;;
     dnf)
       dnf install -y epel-release || true
@@ -111,10 +118,8 @@ write_dns_service_files() {
   install -d -m 0755 /etc/dnsmasq.d
   install -d -m 0755 "$CONFIG_DIR/conf.d"
   touch "$CONFIG_DIR/hosts"
-  touch "$RECORDS_FILE"
   touch "$CLIENTS_FILE"
   chmod 0644 "$CONFIG_DIR/hosts"
-  chmod 0644 "$RECORDS_FILE"
   chmod 0644 "$CLIENTS_FILE"
 
   if [ -n "$CLIENT_ALLOWLIST" ]; then
@@ -126,30 +131,11 @@ write_dns_service_files() {
     done
   fi
 
-  if [ -n "$UNLOCK_TARGET_IP" ]; then
-    write_preset_unlock_records "$UNLOCK_TARGET_IP"
-  fi
+  write_preset_unlock_records "$UNLOCK_TARGET_IP"
 
-  {
-    echo "# Managed by dns-service-onekey"
-    echo "port=$DNS_PORT"
-    echo "listen-address=$LISTEN_ADDR"
-    echo "bind-dynamic"
-    echo "no-resolv"
-    echo "domain-needed"
-    echo "bogus-priv"
-    echo "cache-size=$CACHE_SIZE"
-    echo "conf-dir=$CONFIG_DIR/conf.d,*.conf"
-    IFS=',' read -r -a upstreams <<<"$UPSTREAM_DNS"
-    for dns in "${upstreams[@]}"; do
-      dns="${dns//[[:space:]]/}"
-      [ -n "$dns" ] && echo "server=$dns"
-    done
-    if [ "$LOG_QUERIES" = "1" ]; then
-      echo "log-queries"
-      echo "log-facility=/var/log/dnsmasq.log"
-    fi
-  } >"$DNSMASQ_CONFIG"
+  if ! grep -Eq '^[[:space:]]*conf-dir=/etc/dnsmasq.d' /etc/dnsmasq.conf 2>/dev/null; then
+    echo "conf-dir=/etc/dnsmasq.d" >>/etc/dnsmasq.conf
+  fi
 }
 
 write_preset_unlock_records() {
@@ -158,34 +144,50 @@ write_preset_unlock_records() {
   local script_dir=""
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
 
-  if [ -n "$script_dir" ] && [ -f "$script_dir/config/unlock-domains.txt" ]; then
-    domains_file="$script_dir/config/unlock-domains.txt"
+  if [ -n "$script_dir" ] && [ -f "$script_dir/config/proxy-domains.txt" ]; then
+    domains_file="$script_dir/config/proxy-domains.txt"
   elif [ -n "$RAW_BASE" ]; then
     domains_file="$(mktemp)"
     if command -v curl >/dev/null 2>&1; then
-      curl -fsSL "$RAW_BASE/config/unlock-domains.txt" -o "$domains_file"
+      curl -fsSL "$RAW_BASE/config/proxy-domains.txt" -o "$domains_file"
     elif command -v wget >/dev/null 2>&1; then
-      wget -qO "$domains_file" "$RAW_BASE/config/unlock-domains.txt"
+      wget -qO "$domains_file" "$RAW_BASE/config/proxy-domains.txt"
     else
       warn "未找到 curl 或 wget，无法下载预置域名列表。"
       return
     fi
   else
-    warn "未找到 config/unlock-domains.txt，跳过预置解锁域名。"
+    warn "未找到 config/proxy-domains.txt，跳过预置解锁域名。"
     return
   fi
 
-  info "写入预置解锁域名到 $RECORDS_FILE..."
+  info "按原项目格式写入 dnsmasq 配置到 $DNSMASQ_CONFIG..."
   {
-    echo "# Managed by dns-service-onekey"
-    echo "# Generated from config/unlock-domains.txt"
+    echo "domain-needed"
+    echo "bogus-priv"
+    echo "no-resolv"
+    echo "no-poll"
+    echo "all-servers"
+    IFS=',' read -r -a upstreams <<<"$UPSTREAM_DNS"
+    for dns in "${upstreams[@]}"; do
+      dns="${dns//[[:space:]]/}"
+      [ -n "$dns" ] && echo "server=$dns"
+    done
+    echo "cache-size=$CACHE_SIZE"
+    echo "local-ttl=60"
+    echo "interface=*"
+    if [ "$LOG_QUERIES" = "1" ]; then
+      echo "log-queries"
+      echo "log-facility=/var/log/dnsmasq.log"
+    fi
     while IFS= read -r domain; do
       domain="${domain%%#*}"
       domain="${domain//[[:space:]]/}"
       [ -z "$domain" ] && continue
       echo "address=/$domain/$target_ip"
     done <"$domains_file"
-  } >"$RECORDS_FILE"
+  } >"$DNSMASQ_CONFIG"
+  chmod 0644 "$DNSMASQ_CONFIG"
 }
 
 open_firewall_if_available() {
@@ -251,18 +253,18 @@ install_admin_panel() {
     install -m 0755 "$script_dir/web/admin.py" "$ADMIN_APP_DIR/web/admin.py"
     install -m 0755 "$script_dir/scripts/sync-firewall.sh" "$FIREWALL_SYNC_SCRIPT"
     install -d -m 0755 "$ADMIN_APP_DIR/config"
-    install -m 0644 "$script_dir/config/unlock-domains.txt" "$ADMIN_APP_DIR/config/unlock-domains.txt"
+    install -m 0644 "$script_dir/config/proxy-domains.txt" "$UNLOCK_DOMAINS_FILE"
   elif [ -n "$RAW_BASE" ]; then
     if command -v curl >/dev/null 2>&1; then
       curl -fsSL "$RAW_BASE/web/admin.py" -o "$ADMIN_APP_DIR/web/admin.py"
       curl -fsSL "$RAW_BASE/scripts/sync-firewall.sh" -o "$FIREWALL_SYNC_SCRIPT"
       install -d -m 0755 "$ADMIN_APP_DIR/config"
-      curl -fsSL "$RAW_BASE/config/unlock-domains.txt" -o "$ADMIN_APP_DIR/config/unlock-domains.txt"
+      curl -fsSL "$RAW_BASE/config/proxy-domains.txt" -o "$UNLOCK_DOMAINS_FILE"
     elif command -v wget >/dev/null 2>&1; then
       wget -qO "$ADMIN_APP_DIR/web/admin.py" "$RAW_BASE/web/admin.py"
       wget -qO "$FIREWALL_SYNC_SCRIPT" "$RAW_BASE/scripts/sync-firewall.sh"
       install -d -m 0755 "$ADMIN_APP_DIR/config"
-      wget -qO "$ADMIN_APP_DIR/config/unlock-domains.txt" "$RAW_BASE/config/unlock-domains.txt"
+      wget -qO "$UNLOCK_DOMAINS_FILE" "$RAW_BASE/config/proxy-domains.txt"
     else
       warn "未找到 curl 或 wget，跳过 Web 面板安装。"
       return
@@ -314,27 +316,40 @@ EOF
 
 install_unlock_proxy() {
   info "写入 sniproxy 配置..."
+  install -d -m 0755 /var/log/sniproxy
   {
     cat <<'EOF'
 user daemon
-pidfile /var/run/sniproxy.pid
+pidfile /var/tmp/sniproxy.pid
 
 error_log {
     syslog daemon
     priority notice
 }
 
-listener 0.0.0.0 80 {
+resolver {
+    nameserver 8.8.8.8
+    nameserver 8.8.4.4
+    mode ipv4_only
+}
+
+listener 0.0.0.0:80 {
     proto http
-    table unlock_hosts
+    access_log {
+        filename /var/log/sniproxy/http_access.log
+        priority notice
+    }
 }
 
-listener 0.0.0.0 443 {
+listener 0.0.0.0:443 {
     proto tls
-    table unlock_hosts
+    access_log {
+        filename /var/log/sniproxy/https_access.log
+        priority notice
+    }
 }
 
-table unlock_hosts {
+table {
 EOF
     while IFS= read -r domain; do
       domain="${domain%%#*}"
@@ -394,8 +409,8 @@ main() {
     info "自动检测到解锁目标 IP: $UNLOCK_TARGET_IP"
   fi
   stop_local_resolved_if_needed
-  write_dns_service_files
   install_packages "$pm"
+  write_dns_service_files
   enable_service
   install_admin_panel
   install_unlock_proxy
