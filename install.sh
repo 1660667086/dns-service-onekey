@@ -7,7 +7,7 @@ ADMIN_APP_DIR="/opt/dns-service-onekey"
 ADMIN_SERVICE_FILE="/etc/systemd/system/${ADMIN_SERVICE_NAME}.service"
 CLIENTS_FILE="$CONFIG_DIR/clients.allow"
 FIREWALL_SYNC_SCRIPT="$ADMIN_APP_DIR/scripts/sync-firewall.sh"
-UPSTREAM_INSTALLER_URL="${UPSTREAM_INSTALLER_URL:-https://raw.githubusercontent.com/myxuchangbin/dnsmasq_sniproxy_install/master/dnsmasq_sniproxy.sh}"
+CORE_INSTALLER_URL="${CORE_INSTALLER_URL:-}"
 RAW_BASE="${RAW_BASE:-}"
 ADMIN_BIND="${ADMIN_BIND:-0.0.0.0}"
 ADMIN_PORT="${ADMIN_PORT:-8080}"
@@ -64,8 +64,23 @@ ensure_python3() {
 
 install_original_dns_unlock() {
   local installer="/tmp/dnsmasq_sniproxy.sh"
-  info "下载并运行原版 Dnsmasq + SNI Proxy 安装脚本..."
-  download_file "$UPSTREAM_INSTALLER_URL" "$installer"
+  local script_dir=""
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+
+  if [ -n "$script_dir" ] && [ -f "$script_dir/upstream/dnsmasq_sniproxy.sh" ]; then
+    info "运行仓库内置原版 Dnsmasq + SNI Proxy 安装脚本..."
+    install -m 0755 "$script_dir/upstream/dnsmasq_sniproxy.sh" "$installer"
+    export DNS_SERVICE_ONEKEY_RAW_BASE="${RAW_BASE:-https://raw.githubusercontent.com/1660667086/dns-service-onekey/main}"
+  else
+    local core_url="$CORE_INSTALLER_URL"
+    if [ -z "$core_url" ] && [ -n "$RAW_BASE" ]; then
+      core_url="$RAW_BASE/upstream/dnsmasq_sniproxy.sh"
+    fi
+    [ -n "$core_url" ] || die "未找到内置核心安装脚本。请使用 bootstrap.sh 安装，或设置 RAW_BASE/CORE_INSTALLER_URL。"
+    info "从你的仓库下载内置原版 Dnsmasq + SNI Proxy 安装脚本..."
+    download_file "$core_url" "$installer"
+    export DNS_SERVICE_ONEKEY_RAW_BASE="${RAW_BASE:-${core_url%/upstream/dnsmasq_sniproxy.sh}}"
+  fi
   chmod +x "$installer"
   bash "$installer" -f
 }

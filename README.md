@@ -2,11 +2,24 @@
 
 一键安装“原版 Dnsmasq + SNI Proxy 解锁项目”，并额外加一个 Web 页面管理允许使用的客户端 IP。
 
-核心安装使用公开原版脚本：
+核心安装脚本已经迁移到本仓库：
 
 ```text
-https://github.com/myxuchangbin/dnsmasq_sniproxy_install
+upstream/dnsmasq_sniproxy.sh
 ```
+
+原脚本运行时需要的配置和安装包也迁移到了本仓库：
+
+```text
+upstream/dnsmasq.conf
+upstream/proxy-domains.txt
+upstream/sniproxy.conf
+upstream/sniproxy.service
+upstream/sniproxy/sniproxy_0.6.1_amd64.deb
+upstream/sniproxy/sniproxy-0.6.1-1.el8.x86_64.rpm
+```
+
+服务器安装时只从你的仓库拉取这些核心文件，不再依赖原作者仓库。
 
 本项目只追加：
 
@@ -92,7 +105,7 @@ dig @你的DNS服务器IP openai.com
 
 ## 更新
 
-重新执行一键安装命令即可。已有 `/etc/dns-service/clients.allow` 会保留，原版脚本会重新安装/刷新 `dnsmasq + sniproxy`。
+重新执行一键安装命令即可。已有 `/etc/dns-service/clients.allow` 会保留，内置原版脚本会重新安装/刷新 `dnsmasq + sniproxy`。
 
 ## 卸载
 
