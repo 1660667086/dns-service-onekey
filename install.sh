@@ -62,6 +62,46 @@ ensure_python3() {
   fi
 }
 
+port_53_listeners() {
+  if command -v ss >/dev/null 2>&1; then
+    ss -lntup 2>/dev/null | awk '$5 ~ /:53$/ {print}'
+  elif command -v netstat >/dev/null 2>&1; then
+    netstat -lntup 2>/dev/null | awk '$4 ~ /:53$/ {print}'
+  fi
+}
+
+prepare_dns_port() {
+  info "检查并释放 53 端口..."
+
+  if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files systemd-resolved.service >/dev/null 2>&1; then
+    if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
+      warn "检测到 systemd-resolved，关闭 DNSStubListener 以释放 53 端口..."
+      mkdir -p /etc/systemd/resolved.conf.d
+      cat >/etc/systemd/resolved.conf.d/no-stub-listener.conf <<'EOF'
+[Resolve]
+DNSStubListener=no
+EOF
+      systemctl restart systemd-resolved || true
+    fi
+  fi
+
+  for service in dnsmasq named bind9 unbound; do
+    if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files "$service.service" >/dev/null 2>&1; then
+      if systemctl is-active --quiet "$service" 2>/dev/null; then
+        warn "停止已存在的 $service 服务，避免占用 53 端口..."
+        systemctl stop "$service" || true
+      fi
+    fi
+  done
+
+  local listeners
+  listeners="$(port_53_listeners || true)"
+  if [ -n "$listeners" ]; then
+    printf '%s\n' "$listeners" >&2
+    die "53 端口仍被占用。请先停止上面显示的进程后重新安装。"
+  fi
+}
+
 install_original_dns_unlock() {
   local installer="/tmp/dnsmasq_sniproxy.sh"
   local script_dir=""
@@ -181,6 +221,7 @@ EOF
 
 main() {
   require_root
+  prepare_dns_port
   install_original_dns_unlock
   ensure_python3
   write_initial_clients
